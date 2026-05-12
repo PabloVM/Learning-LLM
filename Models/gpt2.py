@@ -51,9 +51,9 @@ class FeedForward(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.layers = nn.Sequential(
-            nn.Linear(config["emb-dim"], 4 * config["emb-dim"]),
+            nn.Linear(config["emb_dim"], 4 * config["emb_dim"]),
             GELU(),
-            nn.Linear(4 * config["emb-dim"], config["emb-dim"]),
+            nn.Linear(4 * config["emb_dim"], config["emb_dim"]),
         )
 
     def forward(self, x):
@@ -82,61 +82,59 @@ class MultiHeadAttention(nn.Module):
             "mask", torch.triu(torch.ones(context_lenght, context_lenght), diagonal=1)
         )  # Register mask in buffer for helping computation
 
-        def forward(self, x):
-            batches, n_tokens, d_in = x.shape
+    def forward(self, x):
+        batches, n_tokens, d_in = x.shape
 
-            # Calculate qkv
-            queries = self.Q(x)  # (batches, n_tokens, d_out)
-            keys = self.K(x)  # (batches, n_tokens, d_out)
-            values = self.V(x)  # (batches, n_tokens, d_out)
+        # Calculate qkv
+        queries = self.Q(x)  # (batches, n_tokens, d_out)
+        keys = self.K(x)  # (batches, n_tokens, d_out)
+        values = self.V(x)  # (batches, n_tokens, d_out)
 
-            # Split representation into different heads. Each head works on a different slice of the Q/K/V projection.
+        # Split representation into different heads. Each head works on a different slice of the Q/K/V projection.
 
-            queries = queries.view(
-                batches, n_tokens, self.num_heads, self.head_dim
-            )  # batch, token, head, head_dimension
-            keys = keys.view(
-                batches, n_tokens, self.num_heads, self.head_dim
-            )  # batch, token, head, head_dimension
-            values = values.view(
-                batches, n_tokens, self.num_heads, self.head_dim
-            )  # batch, token, head, head_dimension
+        queries = queries.view(
+            batches, n_tokens, self.num_heads, self.head_dim
+        )  # batch, token, head, head_dimension
+        keys = keys.view(
+            batches, n_tokens, self.num_heads, self.head_dim
+        )  # batch, token, head, head_dimension
+        values = values.view(
+            batches, n_tokens, self.num_heads, self.head_dim
+        )  # batch, token, head, head_dimension
 
-            # Rearrange the tensor to computate attention per head
+        # Rearrange the tensor to computate attention per head
 
-            queries = queries.permute(0, 2, 1, 3)  # batch, head, token, head_dimension
-            keys = keys.permute(0, 2, 1, 3)  # batch, head, token, head_dimension
-            values = values.permute(0, 2, 1, 3)  # batch, head, token, head_dimension
+        queries = queries.permute(0, 2, 1, 3)  # batch, head, token, head_dimension
+        keys = keys.permute(0, 2, 1, 3)  # batch, head, token, head_dimension
+        values = values.permute(0, 2, 1, 3)  # batch, head, token, head_dimension
 
-            attn_scores = (
-                queries @ keys.transpose(2, 3)
-            )  # (batch, head, tokens, head_dim) @ (batch, head, head_dim, tokens) = (batch, head, tokens, tokens)
+        attn_scores = (
+            queries @ keys.transpose(2, 3)
+        )  # (batch, head, tokens, head_dim) @ (batch, head, head_dim, tokens) = (batch, head, tokens, tokens)
 
-            # Apply mask to avoid tokens can look in future tokens
+        # Apply mask to avoid tokens can look in future tokens
 
-            mask_bool = self.mask.bool()[:n_tokens, :n_tokens]
-            attn_scores.masked_fill_(
-                mask_bool, -torch.inf
-            )  # -torch.inf becomes 0 when applying softmax
+        mask_bool = self.mask.bool()[:n_tokens, :n_tokens]
+        attn_scores.masked_fill_(
+            mask_bool, -torch.inf
+        )  # -torch.inf becomes 0 when applying softmax
 
-            # Applying softmax attention scores turn into attention weights
-            attn_weights = torch.softmax(attn_scores / keys.shape[-1] ** 0.5, dim=-1)
-            attn_weights = self.dropout(attn_weights)
+        # Applying softmax attention scores turn into attention weights
+        attn_weights = torch.softmax(attn_scores / keys.shape[-1] ** 0.5, dim=-1)
+        attn_weights = self.dropout(attn_weights)
 
-            # Create context vector multipliying attention and values
-            context_vec = attn_weights @ values  # (batch, heads, tokens, head_dim)
-            context_vec = context_vec.transpose(
-                1, 2
-            )  # ( batch, tokens, heads, head_dim)
+        # Create context vector multipliying attention and values
+        context_vec = attn_weights @ values  # (batch, heads, tokens, head_dim)
+        context_vec = context_vec.transpose(1, 2)  # ( batch, tokens, heads, head_dim)
 
-            context_vec = context_vec.contiguous().view(
-                batches, n_tokens, self.d_out
-            )  # Reshapes context vector (batch, tokens, d_out)
+        context_vec = context_vec.contiguous().view(
+            batches, n_tokens, self.d_out
+        )  # Reshapes context vector (batch, tokens, d_out)
 
-            # Join all heads info using a projection layer
-            context_vec = self.projection(context_vec)
+        # Join all heads info using a projection layer
+        context_vec = self.projection(context_vec)
 
-            return context_vec
+        return context_vec
 
 
 class TransformerBlock(nn.Module):
@@ -147,8 +145,8 @@ class TransformerBlock(nn.Module):
         self.att = MultiHeadAttention(
             d_in=config["emb_dim"],
             d_out=config["emb_dim"],
-            context_lenght=config["context_lenght"],
-            num_heads=config["num_heads"],
+            context_lenght=config["context_length"],
+            num_heads=config["n_heads"],
             dropout=config["drop_rate"],
             qkv_bias=config["qkv_bias"],
         )
