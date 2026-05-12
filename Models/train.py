@@ -1,7 +1,7 @@
 import torch
-
+import torch_directml
 from Models.gpt2 import GPTModel
-from Models.config import GPT_CONFIG_124M
+from Models.config import GPT_CONFIG_124M_LOW as GPT_CONFIG_124M
 
 from Data.dataset_creation import create_dataloader
 import tiktoken
@@ -19,7 +19,7 @@ def token_ids_to_text(token_ids, tokenizer):
     return tokenizer.decode(token_ids.squeeze(0).tolist())
 
 
-def generate_text(model, idx, max_new_tokens, context_size):
+def generate_text(model, idx, max_new_tokens, context_size, temperature=1.0, top_k=50):
     # Generate tokens one by one
     for _ in range(max_new_tokens):
         # Keep only the last context_size tokens because the model cannot process sequences longer than its context window
@@ -31,13 +31,22 @@ def generate_text(model, idx, max_new_tokens, context_size):
             logits = model(idx_cond)
 
         # Select logits from the last generated token We only care about predicting the next token Shape:(batch_size, vocab_size)
-        logits = logits[:, -1, :]
+        logits = logits[:, -1, :] / temperature
+
+        if top_k is not None:
+            top_logits, _ = torch.topk(logits, top_k)
+            min_val = top_logits[:, -1].unsqueeze(-1)
+            logits = torch.where(
+                logits < min_val,
+                torch.tensor(float("-inf"), device=logits.device),
+                logits,
+            )
 
         # Convert logits into probabilities
-        probas = torch.softmax(logits, dim=-1)
+        probs = torch.softmax(logits, dim=-1)
 
         # Select the token with highest probability Shape: (batch_size, 1)
-        idx_next = torch.argmax(probas, dim=-1, keepdim=True)
+        idx_next = torch.multinomial(probs, num_samples=1)
 
         # Append the predicted token to the sequence Previous: (batch_size, seq_len) After concatenation:(batch_size, seq_len + 1)
         idx = torch.cat((idx, idx_next), dim=-1)
@@ -74,7 +83,7 @@ def calc_loss_loader(data_loader, model, device, num_batches=None):
         num_batches = min(num_batches, len(data_loader))
 
     for i, (input_batch, target_batch) in enumerate(data_loader):
-        if i > num_batches:
+        if i >= num_batches:
             break
         loss = calc_loss_batch(input_batch, target_batch, model, device)
         total_loss += loss.item()
@@ -101,7 +110,11 @@ def generate_sample(model, tokenizer, device, start_context):
 
     with torch.no_grad():
         token_ids = generate_text(
-            model=model, idx=encoded, max_new_tokens=50, context_size=context_size
+            model=model,
+            idx=encoded,
+            max_new_tokens=50,
+            context_size=context_size,
+            temperature=0.8,
         )
     decoded_text = token_ids_to_text(token_ids, tokenizer)
     print(decoded_text.replace("\n", " "))
@@ -140,7 +153,8 @@ def train(
                 train_loss, val_loss = evaluate_model(
                     model, train_data_loader, val_data_loader, device, eval_iter
                 )
-                train_losses.append(val_loss)
+                train_losses.append(train_loss)
+                val_losses.append(val_loss)
                 track_tokens_seen.append(tokens_seen)
 
                 print(
@@ -164,16 +178,37 @@ if __name__ == "__main__":
     train_text = raw_text[:split_idx]
     val_text = raw_text[split_idx:]
 
-    train_loader = create_dataloader(train_text)
-    val_loader = create_dataloader(val_text)
+    train_loader = create_dataloader(
+        train_text,
+        batch_size=1,
+        max_length=64,
+        stride=64,
+    )
+
+    val_loader = create_dataloader(
+        val_text,
+        batch_size=1,
+        max_length=64,
+        stride=64,
+    )
     torch.manual_seed(123)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    lr = 4e-4
+    weight_decay = 0.1
+
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+
+    else:
+        try:
+            device = torch_directml.device()
+        except Exception:
+            device = torch.device("cpu")
 
     print(f"Using device: {device}")
+    model = GPTModel(GPT_CONFIG_124M).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    model = GPTModel(GPT_CONFIG_124M)
-    model.to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0004, weight_decay=0.1)
     epochs = 10
 
     train_losses, val_losses, tokens_seen = train(
