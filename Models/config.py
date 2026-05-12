@@ -7,3 +7,13 @@ GPT_CONFIG_124M = {
     "drop_rate": 0.1,  # Dropout rate
     "qkv_bias": False,  # Query-Key-Value bias
 }
+
+GPT_CONFIG_124M_LOW = {
+    "vocab_size": 50257,
+    "context_length": 64,
+    "emb_dim": 256,
+    "n_heads": 8,
+    "n_layers": 6,
+    "drop_rate": 0.2,
+    "qkv_bias": False,
+}
