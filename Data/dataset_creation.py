@@ -58,9 +58,3 @@ def create_dataloader(
 dataloader = create_dataloader(
     raw_text, batch_size=1, max_length=4, stride=3, shuffle=False
 )
-
-data_iter = iter(dataloader)
-first_batch = next(data_iter)
-print(first_batch)
-first_batch = next(data_iter)
-print(first_batch)
