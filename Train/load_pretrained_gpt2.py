@@ -42,9 +42,6 @@ def build_weight_map(n_layers):
     return weight_map
 
 
-weight_map = build_weight_map(GPT_CONFIG_124M["n_layers"])
-
-
 def validate_weight_map(hf_state, model_state, weight_map):
     """
     Utility function to validate tensor shape missmatching
@@ -111,6 +108,26 @@ def copy_qkv(hf_state, model_state, n_layers=12, emb_dim=768):
         model_state[f"{model_prefix}.V.bias"].copy_(v_b)
 
 
+def pretrained_gpt2_generator(config):
+    # Class generator function
+
+    model = GPTModel(config)
+    model.eval()
+    gpt2_model = GPT2LMHeadModel.from_pretrained("openai-community/gpt2")
+    gpt2_model.eval()
+
+    pre_state = gpt2_model.state_dict()
+    model_state = model.state_dict()
+
+    weight_map = build_weight_map(config["n_layers"])
+    copy_weights(pre_state, model_state, weight_map)
+    copy_qkv(pre_state, model_state, n_layers=12, emb_dim=768)
+
+    model.load_state_dict(model_state)
+
+    return model
+
+
 if __name__ == "__main__":
     import torch
     import torch_directml
@@ -126,6 +143,7 @@ if __name__ == "__main__":
     hf_state = hf_model.state_dict()
     model_state = model.state_dict()
 
+    weight_map = build_weight_map(GPT_CONFIG_124M["n_layers"])
     copy_weights(hf_state, model_state, weight_map)
     copy_qkv(hf_state, model_state, n_layers=12, emb_dim=768)
     model.load_state_dict(model_state)
