@@ -90,15 +90,13 @@ def calc_loss_loader(data_loader, model, device, num_batches=None):
     return total_loss / num_batches
 
 
-def evaluate_model(model, train_loader, val_loader, device, eval_iter):
+def evaluate_model(
+    model, train_loader, val_loader, device, eval_iter, loss_fn=calc_loss_loader
+):
     model.eval()  # Puts the model in eval mode, disables dropouts
     with torch.no_grad():  # Disables gradient tracking
-        train_loss = calc_loss_loader(
-            train_loader, model, device, num_batches=eval_iter
-        )
-        validation_loss = calc_loss_loader(
-            val_loader, model, device, num_batches=eval_iter
-        )
+        train_loss = loss_fn(train_loader, model, device, num_batches=eval_iter)
+        validation_loss = loss_fn(val_loader, model, device, num_batches=eval_iter)
     model.train()
     return train_loss, validation_loss
 
@@ -132,6 +130,8 @@ def train(
     eval_iter,
     start_context,
     tokenizer,
+    loader_loss_fn=calc_loss_loader,
+    batch_loss_fn=calc_loss_batch,
 ):
     train_losses, val_losses, track_tokens_seen = [], [], []
     tokens_seen, global_step = 0, -1
@@ -140,7 +140,7 @@ def train(
         model.train()  # Puts the model in train mode
         for input_batch, targer_batch in train_data_loader:
             optimizer.zero_grad()  # Reset loss gradients from previous batch train
-            loss = calc_loss_batch(input_batch, targer_batch, model, device)
+            loss = batch_loss_fn(input_batch, targer_batch, model, device)
 
             loss.backward()  # Calculate loss gradients
             optimizer.step()  # Update model weights
@@ -151,7 +151,12 @@ def train(
             # Evaluation step
             if global_step % eval_freq == 0:
                 train_loss, val_loss = evaluate_model(
-                    model, train_data_loader, val_data_loader, device, eval_iter
+                    model,
+                    train_data_loader,
+                    val_data_loader,
+                    device,
+                    eval_iter,
+                    loader_loss_fn,
                 )
                 train_losses.append(train_loss)
                 val_losses.append(val_loss)
@@ -222,4 +227,5 @@ if __name__ == "__main__":
         eval_iter=5,
         start_context="Every effort moves you",
         tokenizer=tokenizer,
+        loss_fn=calc_loss_batch,
     )
