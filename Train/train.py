@@ -132,15 +132,16 @@ def train(
     tokenizer,
     loader_loss_fn=calc_loss_loader,
     batch_loss_fn=calc_loss_batch,
+    save_weights=False,
 ):
     train_losses, val_losses, track_tokens_seen = [], [], []
     tokens_seen, global_step = 0, -1
 
     for epoch in range(epochs):
         model.train()  # Puts the model in train mode
-        for input_batch, targer_batch in train_data_loader:
+        for input_batch, target_batch in train_data_loader:
             optimizer.zero_grad()  # Reset loss gradients from previous batch train
-            loss = batch_loss_fn(input_batch, targer_batch, model, device)
+            loss = batch_loss_fn(input_batch, target_batch, model, device)
 
             loss.backward()  # Calculate loss gradients
             optimizer.step()  # Update model weights
@@ -165,6 +166,13 @@ def train(
                 print(
                     f"Epoch:{epoch + 1} (Step {global_step:06d}): Train loss {train_loss:.3f} Validation loss {val_loss:.3f}"
                 )
+        if save_weights:
+            weights_dir = Path(__file__).parent / "weights"
+            weights_dir.mkdir(parents=True, exist_ok=True)
+            torch.save(
+                model.state_dict(),
+                weights_dir / f"{model.__class__.__name__}_{epoch}.pt2",
+            )
 
         generate_sample(model, tokenizer, device, start_context)
     return train_losses, val_losses, track_tokens_seen
@@ -227,5 +235,6 @@ if __name__ == "__main__":
         eval_iter=5,
         start_context="Every effort moves you",
         tokenizer=tokenizer,
-        loss_fn=calc_loss_batch,
+        batch_loss_fn=calc_loss_batch,
+        loader_loss_fn=calc_loss_loader,
     )
