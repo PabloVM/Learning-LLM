@@ -213,19 +213,16 @@ if __name__ == "__main__":
     splits = {
         "train": "data/train-00000-of-00001.parquet",
         "validation": "data/validation-00000-of-00001.parquet",
-        "test": "data/test-00000-of-00001.parquet",
     }
     train_df = pd.read_parquet("hf://datasets/stanfordnlp/sst2/" + splits["train"])
     validation_df = pd.read_parquet(
         "hf://datasets/stanfordnlp/sst2/" + splits["validation"]
     )
-    test_df = pd.read_parquet("hf://datasets/stanfordnlp/sst2/" + splits["test"])
 
     tokenizer = tiktoken.get_encoding("gpt2")
 
     train_dataset = SentimentDataset(dataframe=train_df, tokenizer=tokenizer)
     validation_dataset = SentimentDataset(dataframe=validation_df, tokenizer=tokenizer)
-    test_dataset = SentimentDataset(dataframe=test_df, tokenizer=tokenizer)
 
     batch_size = 8
 
@@ -238,13 +235,6 @@ if __name__ == "__main__":
     )
     validation_loader = DataLoader(
         dataset=validation_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=0,
-        drop_last=True,
-    )
-    test_loader = DataLoader(
-        dataset=test_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=0,
