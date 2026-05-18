@@ -64,8 +64,8 @@ def calc_loss_batch(input_batch, target_batch, model, device):
     loss = torch.nn.functional.cross_entropy(
         logits.flatten(
             0, 1
-        ),  # logits (batch_size, seq_len, voc_size) -> (predictions, voc_size)
-        target_batch.flatten(),  # Flatten target tokens into a single vector
+        ).contiguous(),  # logits (batch_size, seq_len, voc_size) -> (predictions, voc_size)
+        target_batch.flatten().contiguous(),  # Flatten target tokens into a single vector
     )
 
     return loss
@@ -133,6 +133,7 @@ def train(
     loader_loss_fn=calc_loss_loader,
     batch_loss_fn=calc_loss_batch,
     save_weights=False,
+    train_name="",
 ):
     train_losses, val_losses, track_tokens_seen = [], [], []
     tokens_seen, global_step = 0, -1
@@ -171,7 +172,7 @@ def train(
             weights_dir.mkdir(parents=True, exist_ok=True)
             torch.save(
                 model.state_dict(),
-                weights_dir / f"{model.__class__.__name__}_{epoch}.pt2",
+                weights_dir / f"{model.__class__.__name__}_{epoch}_{train_name}.pt2",
             )
 
         generate_sample(model, tokenizer, device, start_context)
