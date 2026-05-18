@@ -138,7 +138,6 @@ if __name__ == "__main__":
     import pandas as pd
     import tiktoken
     from torch.utils.data import DataLoader
-    import torch_directml
     from Train.load_pretrained_gpt2 import pretrained_gpt2_generator
     from Train.train import train, calc_loss_batch, calc_loss_loader
     from Models.config import GPT_CONFIG_124M
@@ -147,10 +146,7 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         device = torch.device("cuda")
     else:
-        try:
-            device = torch_directml.device()
-        except Exception:
-            device = torch.device("cpu")
+        device = torch.device("cpu")
 
     print(f"Using device: {device}")
 
@@ -230,10 +226,11 @@ Explain what machine learning is
         device,
         epochs=epochs,
         eval_freq=100,
-        eval_iter=5,
+        eval_iter=1,
         start_context=start_context,
         tokenizer=tokenizer,
         batch_loss_fn=calc_loss_batch,
         loader_loss_fn=calc_loss_loader,
         save_weights=True,
+        train_name="instruction",
     )
