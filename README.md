@@ -40,17 +40,17 @@ Implemented directly in PyTorch without relying on high-level transformer abstra
 
 ### LLama-2 implementation from scratch
 
-A decoder-only transformer implementation inspired by LLAMA-2 architecture, including:
+A decoder-only transformer implementation inspired by the Meta Llama 2 architecture, including:
 
 - Token embeddings
-- Rotary position encoding
-- Multi-head self-attention
+- Rotary positional embeddings (RoPE)
+- Grouped-query attention (GQA)
 - Causal masking
-- Feed-forward networks
+- SwiGLU feed-forward networks
 - Residual connections
-- Layer normalization
-- Transformer blocks
-- Autoregressive text generation
+- RMSNorm
+- Stacked decoder blocks
+- Weight tying
 
 [LLAMA2 implementation](Models/llama.py)
 
