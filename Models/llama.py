@@ -3,7 +3,7 @@ import torch
 
 
 class RMSNorm(nn.Module):
-    def __init__(self, emb_dim, eps=1e-6):
+    def __init__(self, emb_dim, eps=1e-5):
         super().__init__()
         self.eps = eps
         self.gamma = nn.Parameter(torch.ones(emb_dim))
@@ -24,40 +24,56 @@ class RotaryPositionEncoding(nn.Module):
 
         assert head_dim % 2 == 0
         positions = torch.arange(self.context_length)
-        inv_freq = torch.tensor(
-            [1 / theta ** (i / self.head_dim) for i in range(0, self.head_dim, 2)]
-        )
+
+        idx = torch.arange(0, head_dim, 2).float()
+        inv_freq = 1.0 / (theta ** (idx / head_dim))
         angles = torch.outer(positions, inv_freq)
 
         self.register_buffer(
-            "cos", torch.cos(angles)
-        )  # [context_lenght , head_dim / 2]
+            "cos", torch.cos(angles)[None, None, :, :]
+        )  # [1,1,context_lenght , head_dim / 2]
         self.register_buffer(
-            "sin", torch.sin(angles)
-        )  # [context_lenght , head_dim / 2]
+            "sin", torch.sin(angles)[None, None, :, :]
+        )  # [1,1,context_lenght , head_dim / 2]
 
     def forward(self, x):
-        x_even = x[..., 0::2]  # [batch, head_dim, n_tokens, emb_dim / 2]
-        x_odd = x[..., 1::2]  # [batch, head_dim, n_tokens, emb_dim / 2]
+        _, _, seq_length, _ = x.shape
 
-        even_rot = x_even * self.cos - x_odd * self.sin
-        odd_rot = x_even * self.sin + x_odd * self.cos
+        if seq_length > self.context_length:
+            raise ValueError("sequence length exceeds context length")
 
-        return torch.tensor((even_root, odd_root))
+        x_even = x[..., 0::2]  # [batch, heads, seq_lenght, head_dim / 2]
+        x_odd = x[..., 1::2]  # [batch, heads, seq_lenght, head_dim / 2]
+
+        even_rot = (
+            x_even * self.cos[:, :, :seq_length, :]
+            - x_odd * self.sin[:, :, :seq_length, :]
+        )
+        odd_rot = (
+            x_even * self.sin[:, :, :seq_length, :]
+            + x_odd * self.cos[:, :, :seq_length, :]
+        )
+
+        encoding = torch.empty_like(x)
+        encoding[..., 0::2] = even_rot
+        encoding[..., 1::2] = odd_rot
+
+        return encoding
 
 
 class GroupedQueryAttention(nn.Module):
-    def __init__(self, context_length, emb_dim, num_heads, num_kv_heads, dropout):
+    def __init__(self, config):
         super().__init__()
+        self.use_rope = config["use_rope"]
+        self.emb_dim = config["emb_dim"]
+        self.num_heads = config["num_heads"]
+        self.num_kv_heads = config["num_kv_heads"]
+        self.context_length = config["context_length"]
 
-        self.emb_dim = emb_dim
-        self.num_heads = num_heads
-        self.num_kv_heads = num_kv_heads
+        assert self.emb_dim % self.num_heads == 0
+        assert self.num_heads % self.num_kv_heads == 0
 
-        assert emb_dim % num_heads == 0
-        assert num_heads % num_kv_heads == 0
-
-        self.head_dim = emb_dim // num_heads
+        self.head_dim = self.emb_dim // self.num_heads
 
         self.q_project = nn.Linear(
             self.emb_dim, self.num_heads * self.head_dim, bias=False
@@ -68,15 +84,26 @@ class GroupedQueryAttention(nn.Module):
         self.v_project = nn.Linear(
             self.emb_dim, self.num_kv_heads * self.head_dim, bias=False
         )
-        self.dropout = nn.Dropout(dropout)
+        if self.use_rope:
+            self.rotary_positional_encoding = RotaryPositionEncoding(
+                self.context_length, self.head_dim
+            )
+        self.dropout = nn.Dropout(config["dropout"])
         self.register_buffer(
-            "mask", torch.triu(torch.ones(context_length, context_length), diagonal=1)
+            "mask",
+            torch.triu(
+                torch.ones(self.context_length, self.context_length), diagonal=1
+            ),
         )  # Register mask in buffer for helping computation
 
         self.out_project = nn.Linear(self.emb_dim, self.emb_dim, bias=False)
 
     def forward(self, x):
         batches, n_tokens, _ = x.shape
+
+        if n_tokens > self.context_length:
+            raise ValueError("sequence length exceeds context length")
+
         q = self.q_project(x)
         k = self.k_project(x)
         v = self.v_project(x)
@@ -90,11 +117,15 @@ class GroupedQueryAttention(nn.Module):
         k = k.permute(0, 2, 1, 3)  # batch, head, token, head_dimension
         v = v.permute(0, 2, 1, 3)  # batch, head, token, head_dimension
 
+        if self.use_rope:
+            q = self.rotary_positional_encoding(q)
+            k = self.rotary_positional_encoding(k)
+
         k = k.repeat_interleave(
-            1, self.num_heads // self.num_kv_heads, 1, 1
+            self.num_heads // self.num_kv_heads, dim=1
         )  # Repeats to share K with multiple Q
         v = v.repeat_interleave(
-            1, self.num_heads // self.num_kv_heads, 1, 1
+            self.num_heads // self.num_kv_heads, dim=1
         )  # Repeats to share v with multiple Q
 
         attn_scores = (
@@ -123,33 +154,76 @@ class GroupedQueryAttention(nn.Module):
         return context_vec
 
 
-class DecoderBlock(nn.Module):
+class FeedForward(nn.Module):
     def __init__(self, emb_dim):
         super().__init__()
-        self.RMSNorm_1 = RMSNorm(emb_dim)
-        self.RMSNorm_2 = RMSNorm(emb_dim)
-        self.group_query_attention_blocks = GroupedQueryAttention()
-        self.FeedForward = "pending"
+        self.hidden_dimension = int(2 / 3 * 4 * emb_dim)
+        self.gate_proj = nn.Linear(emb_dim, self.hidden_dimension, bias=False)
+        self.up_proj = nn.Linear(emb_dim, self.hidden_dimension, bias=False)
+        self.silu = nn.SiLU()
+        self.down_proj = nn.Linear(self.hidden_dimension, emb_dim, bias=False)
 
     def forward(self, x):
-        pass
+        gate = self.silu(self.gate_proj(x))
+        up = self.up_proj(x)
+
+        x = gate * up
+
+        return self.down_proj(x)
+
+
+class DecoderBlock(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.RMSNorm_1 = RMSNorm(config["emb_dim"])
+        self.RMSNorm_2 = RMSNorm(config["emb_dim"])
+        self.group_query_attention = GroupedQueryAttention(config)
+        self.feed_forward = FeedForward(config["emb_dim"])
+
+    def forward(self, x):
+        x_ = x
+        x = self.RMSNorm_1(x)
+        x = self.group_query_attention(x)
+
+        x = x + x_
+        x_ = x
+
+        x = self.RMSNorm_2(x)
+        x = self.feed_forward(x)
+
+        return x + x_
 
 
 class OutputBlock(nn.Module):
-    def __init__(self, emb_dim):
+    def __init__(self, config, weights):
         super().__init__()
-        self.RMSNorm = RMSNorm(emb_dim)
-        self.linear_projection = "pending"
+        self.RMSNorm = RMSNorm(config["emb_dim"])
+        self.linear_projection = nn.Linear(
+            config["emb_dim"], config["vocab_size"], bias=False
+        )
+
+        self.linear_projection.weight = weights
+
+    def forward(self, x):
+        x = self.RMSNorm(x)
+        logits = self.linear_projection(x)
+
+        return logits
 
 
 class Llama(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.token_embedding = nn.Embedding(config["vocab_size"], config["embed_dim"])
+        self.token_embedding = nn.Embedding(config["vocab_size"], config["emb_dim"])
         self.decoder_blocks = nn.ModuleList(
-            [DecoderBlock() for _ in range(config["n_layers"])]
+            [DecoderBlock(config) for _ in range(config["n_layers"])]
         )
-        self.output_block = OutputBlock()
+        self.output_block = OutputBlock(config, self.token_embedding.weight)
 
     def forward(self, x):
-        pass
+        x = self.token_embedding(x)
+        for block in self.decoder_blocks:
+            x = block(x)
+        x = self.output_block(x)
+
+        return x
