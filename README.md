@@ -34,6 +34,26 @@ A decoder-only transformer implementation inspired by GPT-2 architecture, includ
 - Transformer blocks
 - Autoregressive text generation
 
+[GPT2 implementation](Models/gpt2.py)
+
+Implemented directly in PyTorch without relying on high-level transformer abstractions.
+
+### LLama-2 implementation from scratch
+
+A decoder-only transformer implementation inspired by LLAMA-2 architecture, including:
+
+- Token embeddings
+- Rotary position encoding
+- Multi-head self-attention
+- Causal masking
+- Feed-forward networks
+- Residual connections
+- Layer normalization
+- Transformer blocks
+- Autoregressive text generation
+
+[LLAMA2 implementation](Models/llama.py)
+
 Implemented directly in PyTorch without relying on high-level transformer abstractions.
 
 ### Pretrained GPT-2 weight loading
