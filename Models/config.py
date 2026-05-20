@@ -17,3 +17,14 @@ GPT_CONFIG_124M_LOW = {
     "drop_rate": 0.2,
     "qkv_bias": False,
 }
+
+LLAMA_CONFIG = {
+    "vocab_size": 32000,
+    "context_length": 256,
+    "emb_dim": 512,
+    "n_layers": 8,
+    "num_heads": 8,
+    "num_kv_heads": 2,
+    "dropout": 0.1,
+    "use_rope": True,
+}
